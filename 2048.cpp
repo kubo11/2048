@@ -14,13 +14,14 @@ using namespace std;
 
 const int numOfTilesX = 4;
 const int numOfTilesY = 4;
-const int tileSize = 60;
-const int gapSize = 10;
+const int tileSize = 70;
+const int gapSize = 5;
 
 struct TILEDATA {
     HWND window;
     COLORREF color;
     int number;
+    int size;
 }typedef TILEDATA;
 
 struct WINDOWDATA {
@@ -61,7 +62,7 @@ ATOM                MyRegisterTileClass(HINSTANCE);
 void                moveAndTransparency(HWND, HWND, HWND);
 TILEDATA*           getTileData(HWND);
 void                resetTiles();
-void                modifyTile(TILEDATA*, int);
+void                modifyTile(TILEDATA*, int, int);
 void                uncheckAllCheckOne(int);
 void                spawnTwo();
 bool                moveTilesUp();
@@ -73,6 +74,8 @@ void                mergeTile(int, int, int, int);
 void                checkForVictory(int, int);
 void                saveGameState();
 void                loadGameState();
+void                spawnAnim(TILEDATA*);
+void                mergeAnim(TILEDATA*);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -193,8 +196,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
        return FALSE;
    }
 
-   game.windowClientAreaHeight = (numOfTilesY + 1) * (gapSize + tileSize) + gapSize;
-   game.windowClientAreaWidth = numOfTilesX * (gapSize + tileSize) + gapSize;
+   game.windowClientAreaHeight = (numOfTilesY + 1) * tileSize + 2 * gapSize;
+   game.windowClientAreaWidth = numOfTilesX * tileSize + 2 * gapSize;
    game.started = false;
 
    RECT rc;
@@ -376,7 +379,7 @@ LRESULT CALLBACK WndChldProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
         HFONT font = CreateFont(20, 10, 0, 0, FW_BOLD, false, FALSE, 0, EASTEUROPE_CHARSET, 
             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, _T("Verdana"));
         HFONT oldFont = (HFONT)SelectObject(hdc, font);
-        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, tileSize / 3, tileSize / 3);
+        RoundRect(hdc, rc.left + gapSize + tile->size, rc.top + gapSize + tile->size, rc.right - gapSize - tile->size, rc.bottom - gapSize - tile->size, tileSize / 4, tileSize / 4);
         SetTextColor(hdc, RGB(255, 255, 255));
         SetBkMode(hdc, TRANSPARENT);
         if (tile->number >= 0) {
@@ -396,6 +399,39 @@ LRESULT CALLBACK WndChldProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
         SelectObject(hdc, oldFont);
         DeleteObject(font);
         EndPaint(hWnd, &ps);
+    }
+    break;
+    case WM_TIMER:
+    {
+        TILEDATA* tile = getTileData(hWnd);
+        if (wParam == 1) {
+            if (tile->size > 0) {
+                tile->size -= 3;
+                InvalidateRect(hWnd, NULL, TRUE);
+            }
+            else {
+                KillTimer(hWnd, 1);
+            }
+        }
+        else if (wParam == 2) {
+            if (tile->size < 0 && tile->size > -5) {
+                tile->size--;
+                InvalidateRect(hWnd, NULL, TRUE);
+            }
+            else {
+                KillTimer(hWnd, 2);
+                SetTimer(hWnd, 3, 1, NULL);
+            }
+        }
+        else if (wParam == 3) {
+            if (tile->size < 0) {
+                tile->size++;
+                InvalidateRect(hWnd, NULL, TRUE);
+            }
+            else {
+                KillTimer(hWnd, 3);
+            }
+        }
     }
     break;
     case WM_DESTROY:
@@ -422,13 +458,14 @@ void InitMainWindow(WINDOWDATA *wData) {
     for (int i = 0; i < numOfTilesY; ++i) {
         for (int j = 0; j < numOfTilesX; ++j) {
             wData->tiles[i][j].window = CreateWindowW(L"TILE", L"TILE", WS_CHILD | WS_VISIBLE,
-                (j + 1) * gapSize + j * tileSize, (i + 2) * gapSize + (i + 1) * tileSize,
+                j * tileSize + gapSize, (i + 1) * tileSize + gapSize,
                 tileSize, tileSize, wData->window, nullptr, hInst, nullptr);
+            wData->tiles[i][j].size = 0;
         }
     }
     wData->scoreTile.window = CreateWindow(L"TILE", L"TILE", WS_CHILD | WS_VISIBLE, gapSize, gapSize,
-        numOfTilesX * tileSize + (numOfTilesX - 1) * gapSize, tileSize, wData->window, nullptr,
-        hInst, nullptr);
+        numOfTilesX * tileSize, tileSize, wData->window, nullptr, hInst, nullptr);
+    wData->scoreTile.size = 0;
     resetTiles();
 }
 
@@ -463,7 +500,6 @@ TILEDATA* getTileData(HWND hWnd) {
         }
     }
     if (hWnd == game.mainWindow.scoreTile.window) return &game.mainWindow.scoreTile;
-    return &game.mirroredWindow.scoreTile;
     return &game.mainWindow.scoreTile;
 }
 
@@ -486,7 +522,7 @@ void resetTiles() {
     InvalidateRect(game.mirroredWindow.scoreTile.window, NULL, TRUE);
 }
 
-void modifyTile(TILEDATA *tile, int number) {
+void modifyTile(TILEDATA *tile, int number, int anim) {
     tile->number = number;
     switch (number)
     {
@@ -530,6 +566,11 @@ void modifyTile(TILEDATA *tile, int number) {
     default:
         break;
     }
+    if (anim == 1) {
+        spawnAnim(tile);
+        return;
+    }
+    if (anim == 2) mergeAnim(tile);
     InvalidateRect(tile->window, NULL, TRUE);
 }
 
@@ -564,8 +605,8 @@ void spawnTwo() {
     for (int i = 0; i < numOfTilesX; ++i) {
         for (int j = 0; j < numOfTilesY; ++j) {
             if (game.mainWindow.tiles[(y + j) % numOfTilesY][(x + i) % numOfTilesX].number == -1) {
-                modifyTile(&game.mainWindow.tiles[(y + j) % numOfTilesY][(x + i) % numOfTilesX], 2);
-                modifyTile(&game.mirroredWindow.tiles[(y + j) % numOfTilesY][(x + i) % numOfTilesX], 2);
+                modifyTile(&game.mainWindow.tiles[(y + j) % numOfTilesY][(x + i) % numOfTilesX], 2, 1);
+                modifyTile(&game.mirroredWindow.tiles[(y + j) % numOfTilesY][(x + i) % numOfTilesX], 2, 1);
                 return;
             }
         }
@@ -689,20 +730,20 @@ bool moveTilesRight() {
 }
 
 void pushTile(int fromX, int fromY, int toX, int toY) {
-    modifyTile(&game.mainWindow.tiles[toY][toX], game.mainWindow.tiles[fromY][fromX].number);
-    modifyTile(&game.mainWindow.tiles[fromY][fromX], 0);
-    modifyTile(&game.mirroredWindow.tiles[toY][toX], game.mirroredWindow.tiles[fromY][fromX].number);
-    modifyTile(&game.mirroredWindow.tiles[fromY][fromX], 0);
+    modifyTile(&game.mainWindow.tiles[toY][toX], game.mainWindow.tiles[fromY][fromX].number, 0);
+    modifyTile(&game.mainWindow.tiles[fromY][fromX], 0, 0);
+    modifyTile(&game.mirroredWindow.tiles[toY][toX], game.mirroredWindow.tiles[fromY][fromX].number, 0);
+    modifyTile(&game.mirroredWindow.tiles[fromY][fromX], 0, 0);
 }
 
 void mergeTile(int fromX, int fromY, int toX, int toY) {
     int sum = game.mainWindow.tiles[toY][toX].number + game.mainWindow.tiles[fromY][fromX].number;
-    modifyTile(&game.mainWindow.tiles[toY][toX], sum);
-    modifyTile(&game.mainWindow.tiles[fromY][fromX], 0);
+    modifyTile(&game.mainWindow.tiles[toY][toX], sum, 2);
+    modifyTile(&game.mainWindow.tiles[fromY][fromX], 0, 0);
     game.mainWindow.scoreTile.number += sum;
     InvalidateRect(game.mainWindow.scoreTile.window, NULL, TRUE);
-    modifyTile(&game.mirroredWindow.tiles[toY][toX], sum);
-    modifyTile(&game.mirroredWindow.tiles[fromY][fromX], 0);
+    modifyTile(&game.mirroredWindow.tiles[toY][toX], sum, 2);
+    modifyTile(&game.mirroredWindow.tiles[fromY][fromX], 0, 0);
     game.mirroredWindow.scoreTile.number += sum;
     InvalidateRect(game.mirroredWindow.scoreTile.window, NULL, TRUE);
 }
@@ -766,8 +807,8 @@ void loadGameState() {
             for (int j = 0; j < numOfTilesX; ++j) {
                 end = s.find(";");
                 n = stoi(s.substr(0, end));
-                modifyTile(&game.mainWindow.tiles[i][j], n);
-                modifyTile(&game.mirroredWindow.tiles[i][j], n);
+                modifyTile(&game.mainWindow.tiles[i][j], n, 0);
+                modifyTile(&game.mirroredWindow.tiles[i][j], n, 0);
                 s.erase(0, end + 1);
             }
         }
@@ -780,4 +821,14 @@ void loadGameState() {
     DrawMenuBar(game.mirroredWindow.window);
 
     file.close();
+}
+
+void spawnAnim(TILEDATA *tile) {
+    tile->size = 30;
+    SetTimer(tile->window, 1, 1, NULL);
+}
+
+void mergeAnim(TILEDATA *tile) {
+    tile->size = -1;
+    SetTimer(tile->window, 2, 1, NULL);
 }
