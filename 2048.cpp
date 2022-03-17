@@ -4,13 +4,48 @@
 #include "framework.h"
 #include "dwmapi.h"
 #include "2048.h"
+#include <string>
 
 #define MAX_LOADSTRING 100
+
+using namespace std;
+
+const int numOfTilesX = 4;
+const int numOfTilesY = 4;
+const int tileSize = 60;
+const int gapSize = 10;
+
+struct TILEDATA {
+    HWND window;
+    COLORREF color;
+    int number;
+}typedef TILEDATA;
+
+struct WINDOWDATA {
+    TILEDATA tiles[numOfTilesY][numOfTilesX];
+    TILEDATA scoreTile;
+    HWND window;
+}typedef WINDOWDATA;
+
+struct GAMEDATA {
+    WINDOWDATA mainWindow;
+    WINDOWDATA mirroredWindow;
+    int windowHeight;
+    int windowWidth;
+    int windowClientAreaHeight;
+    int windowClientAreaWidth;
+    int screenHeight;
+    int screenWidth;
+    int endValue;
+    bool started;
+}typedef GAMEDATA;
 
 // Global Variables:
 HINSTANCE hInst;                                // current instance
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
+
+GAMEDATA game;
 
 // Forward declarations of functions included in this code module:
 ATOM                MyRegisterClass(HINSTANCE hInstance);
@@ -18,27 +53,23 @@ BOOL                InitInstance(HINSTANCE, int);
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
 
-LRESULT CALLBACK WndChldProc(HWND, UINT, WPARAM, LPARAM);
-void InitMainWindow(HWND);
-
-const int numOfTilesX = 4;
-const int numOfTilesY = 4;
-HWND tiles[numOfTilesY][numOfTilesX];
-const int tileSize = 60;
-const int gapSize = 10;
-HWND mainWindow;
-int mainWindowHeight;
-int mainWindowWidth;
-int mainWindowClientAreaHeight;
-int mainWindowClientAreaWidth;
-HWND mirroredWindow;
-const int mirroredWindowOffsetX = 500;
-const int mirroredWindowOffsetY = 150;
-int screenHeight;
-int screenWidth;
-
+LRESULT             CALLBACK WndChldProc(HWND, UINT, WPARAM, LPARAM);
+void                InitMainWindow(WINDOWDATA*);
 ATOM                MyRegisterTileClass(HINSTANCE);
 void                moveAndTransparency(HWND, HWND, HWND);
+TILEDATA*           getTileData(HWND);
+void                resetTiles();
+void                modifyTile(TILEDATA*, int);
+void                setEndValue();
+void                uncheckAllCheckOne(UINT);
+void                spawnTwo();
+bool                moveTilesUp();
+bool                moveTilesLeft();
+bool                moveTilesDown();
+bool                moveTilesRight();
+void                pushTile(int, int, int, int);
+void                mergeTile(int, int, int, int);
+void                checkForVictory(int, int);
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -119,7 +150,7 @@ ATOM MyRegisterTileClass(HINSTANCE hInstance)
     wcex.hInstance = hInst;
     wcex.hIcon = nullptr;
     wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wcex.hbrBackground = CreateSolidBrush(RGB(204, 192, 174));
+    wcex.hbrBackground = CreateSolidBrush(RGB(250, 247, 238));
     wcex.lpszMenuName = nullptr;
     wcex.lpszClassName = L"TILE";
     wcex.hIconSm = nullptr;
@@ -141,39 +172,42 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 {
    hInst = hInstance; // Store instance handle in our global variable
 
-   mainWindow = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW ^ WS_THICKFRAME | WS_CLIPCHILDREN,
-      100, 100, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
+   game.mainWindow.window = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW ^ WS_THICKFRAME | WS_CLIPCHILDREN,
+       0, 0, CW_USEDEFAULT, 0, nullptr, nullptr, hInstance, nullptr);
 
-   if (!mainWindow)
+   if (!game.mainWindow.window)
    {
        return FALSE;
    }
 
-   mirroredWindow = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPED | WS_CAPTION,
-       100 + mirroredWindowOffsetX, 100 + mirroredWindowOffsetY, CW_USEDEFAULT, 0, mainWindow, nullptr, hInstance, nullptr);
+   game.mirroredWindow.window = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPED | WS_CAPTION,
+       700, 200, CW_USEDEFAULT, 0, game.mainWindow.window, nullptr, hInstance, nullptr);
 
-   if (!mirroredWindow)
+   if (!game.mirroredWindow.window)
    {
        return FALSE;
    }
 
-   mainWindowClientAreaHeight = numOfTilesY * (gapSize + tileSize) + gapSize;
-   mainWindowClientAreaWidth = numOfTilesX * (gapSize + tileSize) + gapSize;
+   game.windowClientAreaHeight = (numOfTilesY + 1) * (gapSize + tileSize) + gapSize;
+   game.windowClientAreaWidth = numOfTilesX * (gapSize + tileSize) + gapSize;
+   game.started = false;
+
+   setEndValue();
 
    RECT rc;
    SystemParametersInfo(SPI_GETWORKAREA, 0, &rc, 0);
-   screenHeight = rc.bottom - rc.top;
-   screenWidth = rc.right - rc.left;
+   game.screenHeight = rc.bottom - rc.top;
+   game.screenWidth = rc.right - rc.left;
 
-   SetWindowLong(mirroredWindow, GWL_EXSTYLE, GetWindowLong(mirroredWindow, GWL_EXSTYLE) | WS_EX_LAYERED);
-   InitMainWindow(mirroredWindow);
-   ShowWindow(mirroredWindow, nCmdShow);
-   UpdateWindow(mirroredWindow);
+   SetWindowLong(game.mirroredWindow.window, GWL_EXSTYLE, GetWindowLong(game.mirroredWindow.window, GWL_EXSTYLE) | WS_EX_LAYERED);
+   InitMainWindow(&game.mirroredWindow);
+   ShowWindow(game.mirroredWindow.window, nCmdShow);
+   UpdateWindow(game.mirroredWindow.window);
 
-   SetForegroundWindow(mainWindow);
-   InitMainWindow(mainWindow);
-   ShowWindow(mainWindow, nCmdShow);
-   UpdateWindow(mainWindow);
+   SetForegroundWindow(game.mainWindow.window);
+   InitMainWindow(&game.mainWindow);
+   ShowWindow(game.mainWindow.window, nCmdShow);
+   UpdateWindow(game.mainWindow.window);
    
    //BringWindowToTop(mainWindow);
 
@@ -196,10 +230,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     {
     case WM_MOVE:
     {
-        if (hWnd == mainWindow)
-            moveAndTransparency(mainWindow, mirroredWindow, mirroredWindow);
+        if (hWnd == game.mainWindow.window)
+            moveAndTransparency(game.mainWindow.window, game.mirroredWindow.window, game.mirroredWindow.window);
         else
-            moveAndTransparency(mirroredWindow, mainWindow, mirroredWindow);
+            moveAndTransparency(game.mirroredWindow.window, game.mainWindow.window, game.mirroredWindow.window);
     }
     break;
     case WM_COMMAND:
@@ -208,6 +242,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             // Parse the menu selections:
             switch (wmId)
             {
+            case ID_GAME_NEWGAME:
+            {
+                resetTiles();
+                spawnTwo();
+                game.started = true;
+            }
+                break;
+            case ID_GOAL_8:
+                uncheckAllCheckOne(ID_GOAL_8);
+                break;
+            case ID_GOAL_16:
+                uncheckAllCheckOne(ID_GOAL_16);
+                break;
+            case ID_GOAL_64:
+                uncheckAllCheckOne(ID_GOAL_64);
+                break;
+            case ID_GOAL_2048:
+                uncheckAllCheckOne(ID_GOAL_2048);
+                break;
             case IDM_ABOUT:
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
                 break;
@@ -219,6 +272,36 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
         }
         break;
+    case WM_CHAR:
+    {
+        if (game.started) {
+            switch ((char)wParam)
+            {
+            case 'w':
+            {
+                if (moveTilesUp()) spawnTwo();
+            }
+            break;
+            case 'a':
+            {
+                if (moveTilesLeft()) spawnTwo();
+            }
+            break;
+            case 's':
+            {
+                if (moveTilesDown()) spawnTwo();
+            }
+            break;
+            case 'd':
+            {
+                if (moveTilesRight()) spawnTwo();
+            }
+            break;
+            default:
+                break;
+            }
+        }
+    }
     case WM_PAINT:
         {
             PAINTSTRUCT ps;
@@ -274,6 +357,42 @@ LRESULT CALLBACK WndChldProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
         }
     }
     break;
+    case WM_PAINT:
+    {
+        RECT rc;
+        GetClientRect(hWnd, &rc);
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        TILEDATA* tile = getTileData(hWnd);
+        HPEN pen = CreatePen(PS_SOLID, 2, tile->color);
+        HPEN oldPen = (HPEN)SelectObject(hdc, pen);
+        HBRUSH brush = CreateSolidBrush(tile->color);
+        HBRUSH oldBrush = (HBRUSH)SelectObject(hdc, brush);
+        HFONT font = CreateFont(20, 10, 0, 0, FW_BOLD, false, FALSE, 0, EASTEUROPE_CHARSET, 
+            OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, _T("Verdana"));
+        HFONT oldFont = (HFONT)SelectObject(hdc, font);
+        RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, tileSize / 3, tileSize / 3);
+        SetTextColor(hdc, RGB(255, 255, 255));
+        SetBkMode(hdc, TRANSPARENT);
+        if (tile->number >= 0) {
+            string str = to_string(tile->number);
+            TCHAR* s = new TCHAR[str.size() + 1];
+            s[str.size()] = 0;
+            copy(str.begin(), str.end(), s);
+            DrawText(hdc, s, (int)_tcslen(s), &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        else {
+            DrawText(hdc, _T(""), 0, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
+        SelectObject(hdc, oldPen);
+        DeleteObject(pen);
+        SelectObject(hdc, oldBrush);
+        DeleteObject(brush);
+        SelectObject(hdc, oldFont);
+        DeleteObject(font);
+        EndPaint(hWnd, &ps);
+    }
+    break;
     case WM_DESTROY:
         PostQuitMessage(0);
         break;
@@ -283,25 +402,29 @@ LRESULT CALLBACK WndChldProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lPar
     return 0;
 }
 
-void InitMainWindow(HWND hWnd) {
+void InitMainWindow(WINDOWDATA *wData) {
     RECT rc;
-    GetWindowRect(hWnd, &rc);
-    rc.right = rc.left + mainWindowClientAreaWidth;
-    rc.bottom = rc.top + mainWindowClientAreaHeight;
-    AdjustWindowRectEx(&rc, (DWORD)GetWindowLong(hWnd, GWL_STYLE), GetMenu(hWnd) != NULL, 
-        (DWORD)GetWindowLong(hWnd, GWL_EXSTYLE));
-    mainWindowHeight = rc.bottom - rc.top;
-    mainWindowWidth = rc.right - rc.left;
-    MoveWindow(hWnd, rc.left, rc.top, mainWindowWidth, mainWindowHeight, TRUE);
+    GetWindowRect(wData->window, &rc);
+    rc.right = rc.left + game.windowClientAreaWidth;
+    rc.bottom = rc.top + game.windowClientAreaHeight;
+    AdjustWindowRectEx(&rc, (DWORD)GetWindowLong(wData->window, GWL_STYLE), GetMenu(wData->window) != NULL,
+        (DWORD)GetWindowLong(wData->window, GWL_EXSTYLE));
+    game.windowHeight = rc.bottom - rc.top;
+    game.windowWidth = rc.right - rc.left;
+    MoveWindow(wData->window, rc.left, rc.top, game.windowWidth, game.windowHeight, TRUE);
 
-    SetWindowText(hWnd, L"2048");
+    SetWindowText(wData->window, L"2048");
     for (int i = 0; i < numOfTilesY; ++i) {
         for (int j = 0; j < numOfTilesX; ++j) {
-            tiles[i][j] = CreateWindowW(L"TILE", L"TILE", WS_CHILD | WS_VISIBLE,
-                (j + 1) * gapSize + j * tileSize, (i + 1) * gapSize + i * tileSize,
-                tileSize, tileSize, hWnd, nullptr, hInst, nullptr);
+            wData->tiles[i][j].window = CreateWindowW(L"TILE", L"TILE", WS_CHILD | WS_VISIBLE,
+                (j + 1) * gapSize + j * tileSize, (i + 2) * gapSize + (i + 1) * tileSize,
+                tileSize, tileSize, wData->window, nullptr, hInst, nullptr);
         }
     }
+    wData->scoreTile.window = CreateWindow(L"TILE", L"TILE", WS_CHILD | WS_VISIBLE, gapSize, gapSize,
+        numOfTilesX * tileSize + (numOfTilesX - 1) * gapSize, tileSize, wData->window, nullptr,
+        hInst, nullptr);
+    resetTiles();
 }
 
 void moveAndTransparency(HWND hWnd1, HWND hWnd2, HWND hWnd3) {
@@ -309,12 +432,12 @@ void moveAndTransparency(HWND hWnd1, HWND hWnd2, HWND hWnd3) {
     GetWindowRect(hWnd1, &rc1);
     GetWindowRect(hWnd2, &rc2);
 
-    rc2.left = screenWidth - rc1.left - mainWindowWidth;
-    rc2.right = screenWidth - rc1.left;
-    rc2.top = screenHeight - rc1.top - mainWindowHeight;
-    rc2.bottom = screenHeight - rc1.top;
+    rc2.left = game.screenWidth - rc1.left - game.windowWidth;
+    rc2.right = game.screenWidth - rc1.left;
+    rc2.top = game.screenHeight - rc1.top - game.windowHeight;
+    rc2.bottom = game.screenHeight - rc1.top;
 
-    MoveWindow(hWnd2, rc2.left, rc2.top, mainWindowWidth, mainWindowHeight, TRUE);
+    MoveWindow(hWnd2, rc2.left, rc2.top, game.windowWidth, game.windowHeight, TRUE);
 
     if ((rc1.left >= rc2.left && rc1.left <= rc2.right || rc1.right >= rc2.left && rc1.right <= rc2.right) &&
         (rc1.top >= rc2.top && rc1.top <= rc2.bottom || rc1.bottom >= rc2.top && rc1.bottom <= rc2.bottom)) {
@@ -325,4 +448,257 @@ void moveAndTransparency(HWND hWnd1, HWND hWnd2, HWND hWnd3) {
         SetLayeredWindowAttributes(hWnd3, 0, 255, LWA_ALPHA);
     }
     UpdateWindow(hWnd3);
+}
+
+TILEDATA* getTileData(HWND hWnd) {
+    for (int i = 0; i < numOfTilesY; ++i) {
+        for (int j = 0; j < numOfTilesX; ++j) {
+            if (hWnd == game.mainWindow.tiles[i][j].window) return &game.mainWindow.tiles[i][j];
+            if (hWnd == game.mirroredWindow.tiles[i][j].window) return &game.mirroredWindow.tiles[i][j];
+        }
+    }
+    if (hWnd == game.mainWindow.scoreTile.window) return &game.mainWindow.scoreTile;
+    return &game.mirroredWindow.scoreTile;
+    return &game.mainWindow.scoreTile;
+}
+
+void resetTiles() {
+    for (int i = 0; i < numOfTilesY; ++i) {
+        for (int j = 0; j < numOfTilesX; ++j) {
+            game.mainWindow.tiles[i][j].number = -1;
+            game.mainWindow.tiles[i][j].color = RGB(204, 192, 174);
+            InvalidateRect(game.mainWindow.tiles[i][j].window, NULL, TRUE);
+            game.mirroredWindow.tiles[i][j].number = -1;
+            game.mirroredWindow.tiles[i][j].color = RGB(204, 192, 174);
+            InvalidateRect(game.mirroredWindow.tiles[i][j].window, NULL, TRUE);
+        }
+    }
+    game.mainWindow.scoreTile.number = 0;
+    game.mainWindow.scoreTile.color = RGB(204, 192, 174);
+    InvalidateRect(game.mainWindow.scoreTile.window, NULL, TRUE);
+    game.mirroredWindow.scoreTile.number = 0;
+    game.mirroredWindow.scoreTile.color = RGB(204, 192, 174);
+    InvalidateRect(game.mirroredWindow.scoreTile.window, NULL, TRUE);
+}
+
+void modifyTile(TILEDATA *tile, int number) {
+    tile->number = number;
+    switch (number)
+    {
+    case 0:
+        tile->number--;
+        tile->color = RGB(204, 192, 174);
+        break;
+    case 2:
+        tile->color = RGB(238, 228, 198);
+        break;
+    case 4:
+        tile->color = RGB(239, 225, 218);
+        break;
+    case 8:
+        tile->color = RGB(243, 179, 124);
+        break;
+    case 16:
+        tile->color = RGB(246, 153, 100);
+        break;
+    case 32:
+        tile->color = RGB(246, 125, 98);
+        break;
+    case 64:
+        tile->color = RGB(247, 93, 60);
+        break;
+    case 128:
+        tile->color = RGB(237, 206, 116);
+        break;
+    case 256:
+        tile->color = RGB(239, 204, 98);
+        break;
+    case 512:
+        tile->color = RGB(243, 201, 85);
+        break;
+    case 1024:
+        tile->color = RGB(238, 200, 72);
+        break;
+    case 2048:
+        tile->color = RGB(239, 192, 47);
+        break;
+    default:
+        break;
+    }
+    InvalidateRect(tile->window, NULL, TRUE);
+}
+
+void setEndValue() {
+    HMENU mn = GetMenu(game.mainWindow.window);
+    if (GetMenuState(mn, ID_GOAL_8, MF_BYCOMMAND) == MF_CHECKED) {
+        game.endValue = 8;
+    }
+    if (GetMenuState(mn, ID_GOAL_16, MF_BYCOMMAND) == MF_CHECKED) {
+        game.endValue = 16;
+    }
+    if (GetMenuState(mn, ID_GOAL_64, MF_BYCOMMAND) == MF_CHECKED) {
+        game.endValue = 64;
+    }
+    if (GetMenuState(mn, ID_GOAL_2048, MF_BYCOMMAND) == MF_CHECKED) {
+        game.endValue = 2048;
+    }
+}
+
+void uncheckAllCheckOne(UINT toCheck) {
+    HMENU mn = GetMenu(game.mainWindow.window);
+    CheckMenuItem(mn, ID_GOAL_8, MF_UNCHECKED);
+    CheckMenuItem(mn, ID_GOAL_16, MF_UNCHECKED);
+    CheckMenuItem(mn, ID_GOAL_64, MF_UNCHECKED);
+    CheckMenuItem(mn, ID_GOAL_2048, MF_UNCHECKED);
+    CheckMenuItem(mn, toCheck, MF_CHECKED);
+    setEndValue();
+}
+
+void spawnTwo() {
+    int x = rand() % numOfTilesX, y = rand() % numOfTilesY;
+    for (int i = 0; i < numOfTilesX; ++i) {
+        for (int j = 0; j < numOfTilesY; ++j) {
+            if (game.mainWindow.tiles[(y + j) % numOfTilesY][(x + i) % numOfTilesX].number == -1) {
+                modifyTile(&game.mainWindow.tiles[(y + j) % numOfTilesY][(x + i) % numOfTilesX], 2);
+                modifyTile(&game.mirroredWindow.tiles[(y + j) % numOfTilesY][(x + i) % numOfTilesX], 2);
+                return;
+            }
+        }
+    }
+    // LOSE
+}
+
+bool moveTilesUp() {
+    bool moved = false;
+    for (int j = 0; j < numOfTilesY; ++j) {
+        bool alreadyMerged[numOfTilesX] = { false };
+        for (int i = numOfTilesX - 1; i > 0; --i) {
+            if (game.mainWindow.tiles[i][j].number > 0) {
+                if (game.mainWindow.tiles[i - 1][j].number == -1) {
+                    pushTile(j, i, j, i - 1);
+                    alreadyMerged[i - 1] = alreadyMerged[i];
+                }
+                else if (!alreadyMerged[i] && game.mainWindow.tiles[i - 1][j].number == game.mainWindow.tiles[i][j].number) {
+                    mergeTile(j, i, j, i - 1);
+                    alreadyMerged[i - 1] = true;
+                    checkForVictory(j, i - 1);
+                }
+                else {
+                    continue;
+                }
+                for (int k = i + 1; k < numOfTilesX; ++k) {
+                    pushTile(j, k, j, k - 1);
+                    alreadyMerged[k - 1] = alreadyMerged[k];
+                }
+                moved = true;
+            }
+        }
+    }
+    return moved;
+}
+
+bool moveTilesLeft() {
+    bool moved = false;
+    for (int i = 0; i < numOfTilesX; ++i) {
+        bool alreadyMerged[numOfTilesY] = { false };
+        for (int j = numOfTilesY - 1; j > 0; --j) {
+            if (game.mainWindow.tiles[i][j].number > 0) {
+                if (game.mainWindow.tiles[i][j - 1].number == -1) {
+                    pushTile(j, i, j - 1, i);
+                    alreadyMerged[j - 1] = alreadyMerged[j];
+                }
+                else if (!alreadyMerged[j] && game.mainWindow.tiles[i][j - 1].number == game.mainWindow.tiles[i][j].number) {
+                    mergeTile(j, i, j - 1, i);
+                    alreadyMerged[j - 1] = true;
+                    checkForVictory(j - 1, i);
+                }
+                else {
+                    continue;
+                }
+                for (int k = j + 1; k < numOfTilesY; ++k) {
+                    pushTile(k, i, k - 1, i);
+                    alreadyMerged[k - 1] = alreadyMerged[k];
+                }
+                moved = true;
+            }
+        }
+    }
+    return moved;
+}
+
+bool moveTilesDown() {
+    bool moved = false;
+    for (int j = 0; j < numOfTilesY; ++j) {
+        bool alreadyMerged[numOfTilesX] = { false };
+        for (int i = 0; i < numOfTilesX - 1; ++i) {
+            if (game.mainWindow.tiles[i][j].number > 0) {
+                if (game.mainWindow.tiles[i + 1][j].number == -1) {
+                    pushTile(j, i, j, i + 1);
+                    alreadyMerged[i + 1] = alreadyMerged[i];
+                }
+                else if (!alreadyMerged[i] && game.mainWindow.tiles[i + 1][j].number == game.mainWindow.tiles[i][j].number) {
+                    mergeTile(j, i, j, i + 1);
+                    alreadyMerged[i + 1] = true;
+                    checkForVictory(j, i + 1);
+                }
+                else {
+                    continue;
+                }
+                for (int k = i - 1; k >= 0; --k) {
+                    pushTile(j, k, j, k + 1);
+                    alreadyMerged[k + 1] = alreadyMerged[k];
+                } moved = true;
+            }
+        }
+    }
+    return moved;
+}
+
+bool moveTilesRight() {
+    bool moved = false;
+    for (int i = 0; i < numOfTilesX; ++i) {
+        bool alreadyMerged[numOfTilesY] = { false };
+        for (int j = 0; j < numOfTilesY - 1; ++j) {
+            if (game.mainWindow.tiles[i][j].number > 0) {
+                if (game.mainWindow.tiles[i][j + 1].number == -1) {
+                    pushTile(j, i, j + 1, i);
+                    alreadyMerged[j + 1] = alreadyMerged[j];
+                }
+                else if (!alreadyMerged[j] && game.mainWindow.tiles[i][j + 1].number == game.mainWindow.tiles[i][j].number) {
+                    mergeTile(j, i, j + 1, i);
+                    alreadyMerged[j + 1] = true;
+                    checkForVictory(j + 1, i);
+                }
+                else {
+                    continue;
+                }
+                for (int k = j - 1; k >= 0; --k) {
+                    pushTile(k, i, k + 1, i);
+                    alreadyMerged[k + 1] = alreadyMerged[k];
+                }
+                moved = true;
+            }
+        }
+    }
+    return moved;
+}
+
+void pushTile(int fromX, int fromY, int toX, int toY) {
+    modifyTile(&game.mainWindow.tiles[toY][toX], game.mainWindow.tiles[fromY][fromX].number);
+    modifyTile(&game.mainWindow.tiles[fromY][fromX], 0);
+    modifyTile(&game.mirroredWindow.tiles[toY][toX], game.mirroredWindow.tiles[fromY][fromX].number);
+    modifyTile(&game.mirroredWindow.tiles[fromY][fromX], 0);
+}
+
+void mergeTile(int fromX, int fromY, int toX, int toY) {
+    modifyTile(&game.mainWindow.tiles[toY][toX], game.mainWindow.tiles[toY][toX].number + game.mainWindow.tiles[fromY][fromX].number);
+    modifyTile(&game.mainWindow.tiles[fromY][fromX], 0);
+    modifyTile(&game.mirroredWindow.tiles[toY][toX], game.mirroredWindow.tiles[toY][toX].number + game.mirroredWindow.tiles[fromY][fromX].number);
+    modifyTile(&game.mirroredWindow.tiles[fromY][fromX], 0);
+}
+
+void checkForVictory(int x, int y) {
+    if (game.mainWindow.tiles[y][x].number >= game.endValue) {
+        game.started = false;
+    }
 }
