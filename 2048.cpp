@@ -5,6 +5,8 @@
 #include "dwmapi.h"
 #include "2048.h"
 #include <string>
+#include <fstream>
+#include <cstdio>
 
 #define MAX_LOADSTRING 100
 
@@ -60,8 +62,7 @@ void                moveAndTransparency(HWND, HWND, HWND);
 TILEDATA*           getTileData(HWND);
 void                resetTiles();
 void                modifyTile(TILEDATA*, int);
-void                setEndValue();
-void                uncheckAllCheckOne(UINT);
+void                uncheckAllCheckOne(int);
 void                spawnTwo();
 bool                moveTilesUp();
 bool                moveTilesLeft();
@@ -70,6 +71,8 @@ bool                moveTilesRight();
 void                pushTile(int, int, int, int);
 void                mergeTile(int, int, int, int);
 void                checkForVictory(int, int);
+void                saveGameState();
+void                loadGameState();
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -106,6 +109,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
             DispatchMessage(&msg);
         }
     }
+
+    saveGameState();
 
     return (int) msg.wParam;
 }
@@ -192,8 +197,6 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    game.windowClientAreaWidth = numOfTilesX * (gapSize + tileSize) + gapSize;
    game.started = false;
 
-   setEndValue();
-
    RECT rc;
    SystemParametersInfo(SPI_GETWORKAREA, 0, &rc, 0);
    game.screenHeight = rc.bottom - rc.top;
@@ -202,14 +205,16 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
    SetWindowLong(game.mirroredWindow.window, GWL_EXSTYLE, GetWindowLong(game.mirroredWindow.window, GWL_EXSTYLE) | WS_EX_LAYERED);
    InitMainWindow(&game.mirroredWindow);
    ShowWindow(game.mirroredWindow.window, nCmdShow);
-   UpdateWindow(game.mirroredWindow.window);
+   
 
    SetForegroundWindow(game.mainWindow.window);
    InitMainWindow(&game.mainWindow);
    ShowWindow(game.mainWindow.window, nCmdShow);
-   UpdateWindow(game.mainWindow.window);
    
-   //BringWindowToTop(mainWindow);
+   
+   loadGameState();
+   UpdateWindow(game.mirroredWindow.window);
+   UpdateWindow(game.mainWindow.window);
 
    return TRUE;
 }
@@ -250,16 +255,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             }
                 break;
             case ID_GOAL_8:
-                uncheckAllCheckOne(ID_GOAL_8);
+                uncheckAllCheckOne(8);
                 break;
             case ID_GOAL_16:
-                uncheckAllCheckOne(ID_GOAL_16);
+                uncheckAllCheckOne(16);
                 break;
             case ID_GOAL_64:
-                uncheckAllCheckOne(ID_GOAL_64);
+                uncheckAllCheckOne(64);
                 break;
             case ID_GOAL_2048:
-                uncheckAllCheckOne(ID_GOAL_2048);
+                uncheckAllCheckOne(2048);
                 break;
             case IDM_ABOUT:
                 DialogBox(hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, About);
@@ -528,30 +533,30 @@ void modifyTile(TILEDATA *tile, int number) {
     InvalidateRect(tile->window, NULL, TRUE);
 }
 
-void setEndValue() {
-    HMENU mn = GetMenu(game.mainWindow.window);
-    if (GetMenuState(mn, ID_GOAL_8, MF_BYCOMMAND) == MF_CHECKED) {
-        game.endValue = 8;
-    }
-    if (GetMenuState(mn, ID_GOAL_16, MF_BYCOMMAND) == MF_CHECKED) {
-        game.endValue = 16;
-    }
-    if (GetMenuState(mn, ID_GOAL_64, MF_BYCOMMAND) == MF_CHECKED) {
-        game.endValue = 64;
-    }
-    if (GetMenuState(mn, ID_GOAL_2048, MF_BYCOMMAND) == MF_CHECKED) {
-        game.endValue = 2048;
-    }
-}
-
-void uncheckAllCheckOne(UINT toCheck) {
+void uncheckAllCheckOne(int endVal) {
     HMENU mn = GetMenu(game.mainWindow.window);
     CheckMenuItem(mn, ID_GOAL_8, MF_UNCHECKED);
     CheckMenuItem(mn, ID_GOAL_16, MF_UNCHECKED);
     CheckMenuItem(mn, ID_GOAL_64, MF_UNCHECKED);
     CheckMenuItem(mn, ID_GOAL_2048, MF_UNCHECKED);
-    CheckMenuItem(mn, toCheck, MF_CHECKED);
-    setEndValue();
+    switch (endVal)
+    {
+    case 8:
+        CheckMenuItem(mn, ID_GOAL_8, MF_CHECKED);
+        break;
+    case 16:
+        CheckMenuItem(mn, ID_GOAL_16, MF_CHECKED);
+        break;
+    case 64:
+        CheckMenuItem(mn, ID_GOAL_64, MF_CHECKED);
+        break;
+    case 2048:
+        CheckMenuItem(mn, ID_GOAL_2048, MF_CHECKED);
+        break;
+    default:
+        break;
+    }
+    game.endValue = endVal;
 }
 
 void spawnTwo() {
@@ -691,14 +696,88 @@ void pushTile(int fromX, int fromY, int toX, int toY) {
 }
 
 void mergeTile(int fromX, int fromY, int toX, int toY) {
-    modifyTile(&game.mainWindow.tiles[toY][toX], game.mainWindow.tiles[toY][toX].number + game.mainWindow.tiles[fromY][fromX].number);
+    int sum = game.mainWindow.tiles[toY][toX].number + game.mainWindow.tiles[fromY][fromX].number;
+    modifyTile(&game.mainWindow.tiles[toY][toX], sum);
     modifyTile(&game.mainWindow.tiles[fromY][fromX], 0);
-    modifyTile(&game.mirroredWindow.tiles[toY][toX], game.mirroredWindow.tiles[toY][toX].number + game.mirroredWindow.tiles[fromY][fromX].number);
+    game.mainWindow.scoreTile.number += sum;
+    InvalidateRect(game.mainWindow.scoreTile.window, NULL, TRUE);
+    modifyTile(&game.mirroredWindow.tiles[toY][toX], sum);
     modifyTile(&game.mirroredWindow.tiles[fromY][fromX], 0);
+    game.mirroredWindow.scoreTile.number += sum;
+    InvalidateRect(game.mirroredWindow.scoreTile.window, NULL, TRUE);
 }
 
 void checkForVictory(int x, int y) {
     if (game.mainWindow.tiles[y][x].number >= game.endValue) {
         game.started = false;
     }
+}
+
+void saveGameState() {
+    ofstream file;
+    file.open("2048.ini");
+    file << "[GAME]" << endl;
+    file << "STATUS=";
+    if (game.started)
+        file << 1 << endl;
+    else
+        file << 1 << endl;
+    file << "SCORE=" << game.mainWindow.scoreTile.number << endl;
+    file << "GOAL=" << game.endValue << endl;
+    file << "BOARD=";
+    for (int i = 0; i < numOfTilesY; ++i) {
+        for (int j = 0; j < numOfTilesX; ++j) {
+            if (game.mainWindow.tiles[i][j].number > 0)
+                file << game.mainWindow.tiles[i][j].number << ";";
+            else
+                file << "0;";
+        }
+    }
+    file.close();
+}
+
+void loadGameState() {
+    ifstream file;
+    file.open("2048.ini");
+    if (file.good()) {
+        string s;
+        int n;
+        // header
+        file >> s;
+        // game start indicator
+        file >> s;
+        game.started = (bool)stoi(s.substr(s.find("=") + 1, s.length() - 1));
+        // score
+        file >> s;
+        n = stoi(s.substr(s.find("=") + 1, s.length() - 1));
+        game.mainWindow.scoreTile.number = n;
+        InvalidateRect(game.mainWindow.scoreTile.window, NULL, TRUE);
+        game.mirroredWindow.scoreTile.number = n;
+        InvalidateRect(game.mirroredWindow.scoreTile.window, NULL, TRUE);
+        // goal
+        file >> s;
+        n = stoi(s.substr(s.find("=") + 1, s.length() - 1));
+        uncheckAllCheckOne(n);
+        // board values
+        file >> s;
+        s = s.substr(s.find("=") + 1, s.length() - 1);
+        int end;
+        for (int i = 0; i < numOfTilesY; ++i) {
+            for (int j = 0; j < numOfTilesX; ++j) {
+                end = s.find(";");
+                n = stoi(s.substr(0, end));
+                modifyTile(&game.mainWindow.tiles[i][j], n);
+                modifyTile(&game.mirroredWindow.tiles[i][j], n);
+                s.erase(0, end + 1);
+            }
+        }
+    }
+    else {
+        resetTiles();
+        uncheckAllCheckOne(2048);
+    }
+    DrawMenuBar(game.mainWindow.window);
+    DrawMenuBar(game.mirroredWindow.window);
+
+    file.close();
 }
