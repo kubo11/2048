@@ -76,6 +76,8 @@ void                saveGameState();
 void                loadGameState();
 void                spawnAnim(TILEDATA*);
 void                mergeAnim(TILEDATA*);
+void                dispEndMess(bool win);
+void                checkForLoss();
 
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
@@ -288,21 +290,25 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
             case 'w':
             {
                 if (moveTilesUp()) spawnTwo();
+                else checkForLoss();
             }
             break;
             case 'a':
             {
                 if (moveTilesLeft()) spawnTwo();
+                else checkForLoss();
             }
             break;
             case 's':
             {
                 if (moveTilesDown()) spawnTwo();
+                else checkForLoss();
             }
             break;
             case 'd':
             {
                 if (moveTilesRight()) spawnTwo();
+                else checkForLoss();
             }
             break;
             default:
@@ -611,7 +617,8 @@ void spawnTwo() {
             }
         }
     }
-    // LOSE
+    game.started = false;
+    dispEndMess(false);
 }
 
 bool moveTilesUp() {
@@ -640,6 +647,7 @@ bool moveTilesUp() {
             }
         }
     }
+    if (!game.started) dispEndMess(true);
     return moved;
 }
 
@@ -669,6 +677,7 @@ bool moveTilesLeft() {
             }
         }
     }
+    if (!game.started) dispEndMess(true);
     return moved;
 }
 
@@ -697,6 +706,7 @@ bool moveTilesDown() {
             }
         }
     }
+    if (!game.started) dispEndMess(true);
     return moved;
 }
 
@@ -726,6 +736,7 @@ bool moveTilesRight() {
             }
         }
     }
+    if (!game.started) dispEndMess(true);
     return moved;
 }
 
@@ -831,4 +842,25 @@ void spawnAnim(TILEDATA *tile) {
 void mergeAnim(TILEDATA *tile) {
     tile->size = -1;
     SetTimer(tile->window, 2, 1, NULL);
+}
+
+void dispEndMess(bool win) {
+    TCHAR buf[15];
+    _stprintf_s(buf, 15, _T("Score: %d"), game.mainWindow.scoreTile.number);
+    if (win) {
+        MessageBox(NULL, buf, L"You win!", MB_OK);
+    }
+    else {
+        MessageBox(NULL, buf, L"Game over!", MB_OK);
+    }
+}
+
+void checkForLoss() {
+    for (int i = 0; i < numOfTilesY; ++i) {
+        for (int j = 0; j < numOfTilesX; ++j) {
+            if (game.mainWindow.tiles[i][j].number == -1) return;
+        }
+    }
+    game.started = false;
+    dispEndMess(false);
 }
